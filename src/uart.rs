@@ -5,6 +5,7 @@ pub struct UartRx {
     // TODO: coloque outros atributos que você precisar aqui
     samples_per_symbol: usize,
     to_pty: Sender<u8>,
+    byte: u8,
 }
 
 impl UartRx {
@@ -13,12 +14,43 @@ impl UartRx {
         UartRx {
             samples_per_symbol,
             to_pty,
+            byte: 0,
         }
     }
 
+    pub fn get_byte(&mut self, byte: &[u8]) {
+        self.byte = 0;
+        let mut j = VecDeque::new();
+        for i in 0..8 {
+            self.byte |= (byte[(i + 1) * 160]) << 7 - i;
+            j.push_back(byte[(i + 1) * 160]);
+        }
+        //println!("byte: {:?}", j);
+    }
+
     pub fn put_samples(&mut self, buffer: &[u8]) {
-        // TODO: seu código aqui
-        self.to_pty.send(65).unwrap();  // TODO: remova esta linha, é um exemplo de como mandar um byte para a pty
+        let mut pointer = 0;
+
+        while pointer < buffer.len() - 160*10 {
+            let mut count = 0;
+            for i in 0..30 {
+                if buffer[i + pointer] == 0 {
+                    count += 1;
+                }
+            }
+
+            pointer += 29;
+
+            if count >= 25 {
+                pointer += 50;
+
+                self.get_byte(&buffer[pointer..pointer + 160*9]);
+
+                self.to_pty.send(self.byte).unwrap();
+
+                pointer += 9*160;
+            }
+        }
     }
 }
 
