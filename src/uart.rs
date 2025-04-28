@@ -18,37 +18,34 @@ impl UartRx {
         }
     }
 
-    pub fn get_byte(&mut self, byte: &[u8]) {
-        self.byte = 0;
-        let mut j = VecDeque::new();
-        for i in 0..8 {
-            self.byte |= (byte[(i + 1) * 160]) << 7 - i;
-            j.push_back(byte[(i + 1) * 160]);
-        }
-        //println!("byte: {:?}", j);
-    }
-
     pub fn put_samples(&mut self, buffer: &[u8]) {
         let mut pointer = 0;
-
-        while pointer < buffer.len() - 160*10 {
+    
+        while pointer + 160 * 10 < buffer.len() {
             let mut count = 0;
+
             for i in 0..30 {
-                if buffer[i + pointer] == 0 {
+                if buffer[pointer + i] == 0 {
                     count += 1;
                 }
             }
-
-            pointer += 29;
-
+    
             if count >= 25 {
-                pointer += 50;
+                pointer += 80;
+                self.byte = 0;
 
-                self.get_byte(&buffer[pointer..pointer + 160*9]);
+                for bit in 0..8 {
+                    let sample = buffer[pointer + (bit + 1) * 160];
+                    if sample & 1 != 0 {
+                        self.byte |= 1 << (7 - bit);
+                    }
+                }
 
                 self.to_pty.send(self.byte).unwrap();
-
-                pointer += 9*160;
+    
+                pointer += 160 * 9;
+            } else {
+                pointer += 1;
             }
         }
     }
