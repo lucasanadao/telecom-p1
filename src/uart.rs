@@ -21,32 +21,50 @@ impl UartRx {
     pub fn put_samples(&mut self, buffer: &[u8]) {
         let mut pointer = 0;
     
-        while pointer + 160 * 10 < buffer.len() {
-            let mut count = 0;
-
-            for i in 0..30 {
-                if buffer[pointer + i] == 0 {
-                    count += 1;
-                }
-            }
-    
-            if count >= 25 {
-                pointer += 80;
-                self.byte = 0;
-
-                for bit in 0..8 {
-                    let sample = buffer[pointer + (bit + 1) * 160];
-                    if sample & 1 != 0 {
-                        self.byte |= 1 << (7 - bit);
+        while pointer + 160 * 9 < buffer.len() {
+            // Possível início de start bit
+            if buffer[pointer] == 0 {
+                // Verifica se pelo menos 25 das 30 amostras próximas ao meio são 0
+                let mut count = 0;
+                for j in 0..30 {
+                    if buffer[pointer + 65 + j] == 0 {
+                        count += 1;
                     }
                 }
-
-                self.to_pty.send(self.byte).unwrap();
     
-                pointer += 160 * 9;
-            } else {
-                pointer += 1;
+                if count >= 25 {
+                    // Meio do start bit
+                    let mut byte = 0;
+                    count = 0;
+
+                    while buffer[pointer] != 1{
+                        for j in 0..30 {
+                            if buffer[pointer - j]  == 1{
+                                count += 1;
+                            }
+                        }
+
+                        if count >= 25 {
+                            break;
+                        }
+
+                        pointer -= 1;
+                    }
+
+                    let mid = pointer + self.samples_per_symbol/2;
+    
+                    for bit_index in 0..8 {
+                        let sample = buffer[mid + (bit_index + 1) * self.samples_per_symbol] & 1;
+                        byte |= sample << bit_index;
+                    }
+    
+                    self.to_pty.send(byte).unwrap();
+                    pointer = mid + 9 * self.samples_per_symbol; // pula todo o símbolo
+                    continue;
+                }
             }
+    
+            pointer += 1;
         }
     }
 }
