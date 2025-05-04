@@ -34,10 +34,6 @@ impl UartRx {
     }
 
     pub fn put_samples(&mut self, buffer: &[u8]) {
-        if self.samples_per_symbol == 160 {
-            //println!("UART RX: {:?}", buffer);
-        }
-
         for &sample in buffer {
             // Armazena últimas 30 amostras
             self.history.push_back(sample);
