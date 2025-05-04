@@ -2,69 +2,94 @@ use crossbeam_channel::Sender;
 use std::collections::VecDeque;
 
 pub struct UartRx {
-    // TODO: coloque outros atributos que você precisar aqui
     samples_per_symbol: usize,
     to_pty: Sender<u8>,
-    byte: u8,
+    history: VecDeque<u8>,
+    state: RxState,
+    sample_count: usize,
+    bit_index: usize,
+    current_byte: u8,
+    mid_bit_counter: usize,
+}
+
+enum RxState {
+    Idle,
+    Receiving,
+    StopBit,
+    MidBit,
 }
 
 impl UartRx {
     pub fn new(samples_per_symbol: usize, to_pty: Sender<u8>) -> Self {
-        // TODO: inicialize seus novos atributos abaixo
-        UartRx {
+        Self {
             samples_per_symbol,
             to_pty,
-            byte: 0,
+            history: VecDeque::with_capacity(30),
+            state: RxState::Idle,
+            sample_count: 0,
+            bit_index: 0,
+            current_byte: 0,
+            mid_bit_counter: 0,
         }
     }
 
     pub fn put_samples(&mut self, buffer: &[u8]) {
-        let mut pointer = 0;
-    
-        while pointer + 160 * 9 < buffer.len() {
-            // Possível início de start bit
-            if buffer[pointer] == 0 {
-                // Verifica se pelo menos 25 das 30 amostras próximas ao meio são 0
-                let mut count = 0;
-                for j in 0..30 {
-                    if buffer[pointer + 65 + j] == 0 {
-                        count += 1;
+        if self.samples_per_symbol == 160 {
+            //println!("UART RX: {:?}", buffer);
+        }
+
+        for &sample in buffer {
+            // Armazena últimas 30 amostras
+            self.history.push_back(sample);
+            if self.history.len() > 30 {
+                self.history.pop_front();
+            }
+
+            match self.state {
+                RxState::Idle => {
+                    if sample == 0 && self.history.len() == 30 {
+                        let low_count = self.history.iter().filter(|&&s| s == 0).count();
+                        if low_count >= 25 && *self.history.front().unwrap() == 0 {
+                            // Detecção de start bit válida
+                            self.sample_count = 0;
+                            self.bit_index = 0;
+                            self.current_byte = 0;
+                            self.mid_bit_counter = 0;
+                            self.state = RxState::MidBit;
+                        }
                     }
                 }
-    
-                if count >= 25 {
-                    // Meio do start bit
-                    let mut byte = 0;
-                    count = 0;
 
-                    while buffer[pointer] != 1{
-                        for j in 0..30 {
-                            if buffer[pointer - j]  == 1{
-                                count += 1;
-                            }
-                        }
-
-                        if count >= 25 {
-                            break;
-                        }
-
-                        pointer -= 1;
+                RxState::MidBit => {
+                    self.mid_bit_counter += 1;
+                    if self.mid_bit_counter >= 20 {
+                        self.state = RxState::Receiving;
                     }
+                }
 
-                    let mid = pointer + self.samples_per_symbol/2;
-    
-                    for bit_index in 0..8 {
-                        let sample = buffer[mid + (bit_index + 1) * self.samples_per_symbol] & 1;
-                        byte |= sample << bit_index;
+                RxState::Receiving => {
+                    self.sample_count += 1;
+                    if self.sample_count == (self.bit_index + 1) * self.samples_per_symbol {
+                        // Pega valor no meio do símbolo
+                        self.current_byte |= sample << self.bit_index;
+                        self.bit_index += 1;
+
+                        if self.bit_index >= 8 {
+                            self.state = RxState::StopBit;
+                        }
                     }
-    
-                    self.to_pty.send(byte).unwrap();
-                    pointer = mid + 9 * self.samples_per_symbol; // pula todo o símbolo
-                    continue;
+                }
+
+                RxState::StopBit => {
+                    self.sample_count += 1;
+                    if self.sample_count == 9 * self.samples_per_symbol {
+                        // Ignora stop bit
+                        let _ = self.to_pty.send(self.current_byte);
+                        self.state = RxState::Idle;
+                        self.history.clear();
+                    }
                 }
             }
-    
-            pointer += 1;
         }
     }
 }
