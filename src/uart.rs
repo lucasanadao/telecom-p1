@@ -26,16 +26,15 @@ impl UartRx {
             to_pty,
             history: VecDeque::with_capacity(30),
             state: RxState::Idle,
+            mid_bit_counter: 0,
             sample_count: 0,
             bit_index: 0,
             current_byte: 0,
-            mid_bit_counter: 0,
         }
     }
 
     pub fn put_samples(&mut self, buffer: &[u8]) {
         for &sample in buffer {
-            // Armazena últimas 30 amostras
             self.history.push_back(sample);
             if self.history.len() > 30 {
                 self.history.pop_front();
@@ -46,11 +45,10 @@ impl UartRx {
                     if sample == 0 && self.history.len() == 30 {
                         let low_count = self.history.iter().filter(|&&s| s == 0).count();
                         if low_count >= 25 && *self.history.front().unwrap() == 0 {
-                            // Detecção de start bit válida
-                            self.sample_count = 0;
                             self.bit_index = 0;
-                            self.current_byte = 0;
+                            self.sample_count = 0;
                             self.mid_bit_counter = 0;
+                            self.current_byte = 0;
                             self.state = RxState::MidBit;
                         }
                     }
@@ -58,7 +56,7 @@ impl UartRx {
 
                 RxState::MidBit => {
                     self.mid_bit_counter += 1;
-                    if self.mid_bit_counter >= 20 {
+                    if self.mid_bit_counter >= 50 {
                         self.state = RxState::Receiving;
                     }
                 }
@@ -79,7 +77,6 @@ impl UartRx {
                 RxState::StopBit => {
                     self.sample_count += 1;
                     if self.sample_count == 9 * self.samples_per_symbol {
-                        // Ignora stop bit
                         let _ = self.to_pty.send(self.current_byte);
                         self.state = RxState::Idle;
                         self.history.clear();
