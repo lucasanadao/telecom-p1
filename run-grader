@@ -1,5 +1,5 @@
 #!/bin/bash
-cargo test --release -- --show-output | python3 grade.py
+cargo test --release -- --show-output | python grade.py
 
 if [[ -n "$GITHUB_TOKEN" ]]; then
     curl --fail-with-body -sL \
